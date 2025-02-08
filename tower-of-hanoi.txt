@@ -1,0 +1,90 @@
+#!/bin/bash
+
+A=(1 2 3 4 5 6 7 8)
+B=()
+C=()
+
+step=1
+victory_sequence=(1 2 3 4 5 6 7 8)
+
+trap 'echo; echo "Для завершения введите q или Q."' SIGINT
+
+print_stacks() {
+    local a_display=() b_display=() c_display=()
+    local lenA=${#A[@]} lenB=${#B[@]} lenC=${#C[@]}
+
+    for ((i=0; i < 8 - lenA; i++)); do a_display+=(""); done
+    a_display+=("${A[@]}")
+    for ((i=0; i < 8 - lenB; i++)); do b_display+=(""); done
+    b_display+=("${B[@]}")
+    for ((i=0; i < 8 - lenC; i++)); do c_display+=(""); done
+    c_display+=("${C[@]}")
+
+    for ((line=0; line<8; line++)); do
+        printf "|%1s|  |%1s|  |%1s|\n" \
+            "${a_display[line]:- }" "${b_display[line]:- }" "${c_display[line]:- }"
+    done
+    echo "+-+  +-+  +-+"
+    echo " A    B    C"
+}
+
+check_victory() {
+    local stack
+    for stack in B C; do
+        eval "local current=(\"\${${stack}[@]}\")"
+        if [[ "${current[*]}" == "${victory_sequence[*]}" ]]; then
+            echo "Поздравляем! Вы собрали башню в стеках $stack!"
+            exit 0
+        fi
+    done
+}
+
+while true; do
+    echo "Ход № $step"
+    print_stacks
+
+    while true; do
+        read -p "Ход № $step (откуда, куда): " input
+        input=$(echo "$input" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+
+        if [[ $input == "Q" ]]; then
+            exit 1
+        fi
+
+        if [[ ${#input} -ne 2 ]]; then
+            echo "Ошибка: введите два символа (например, AB) или Q для выхода."
+            continue
+        fi
+
+        from_stack=${input:0:1}
+        to_stack=${input:1:1}
+
+        if ! [[ "$from_stack" =~ ^[ABC]$ ]] || ! [[ "$to_stack" =~ ^[ABC]$ ]]; then
+            echo "Ошибка: допустимые стеки - A, B, C."
+            continue
+        fi
+
+        from_len=$(eval "echo \${#${from_stack}[@]}")
+        if [[ $from_len -eq 0 ]]; then
+            echo "Ошибка: стек $from_stack пуст."
+            continue
+        fi
+
+        from_val=$(eval "echo \${${from_stack}[0]}")
+        to_val=$(eval "echo \${${to_stack}[0]}")
+
+        if [[ -n "$to_val" && $from_val -gt $to_val ]]; then
+            echo "Такое перемещение запрещено!"
+            continue
+        fi
+
+        break
+    done
+
+    eval "unset ${from_stack}[0]"
+    eval "${from_stack}=(\"\${${from_stack}[@]}\")"
+    eval "${to_stack}=(\"$from_val\" \"\${${to_stack}[@]}\")"
+
+    ((step++))
+    check_victory
+done

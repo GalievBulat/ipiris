@@ -1,0 +1,60 @@
+#!/bin/bash
+
+function generate_number() {
+    digits=($(shuf -i 0-9 | tr '\n' ' ' | awk '{print $1, $2, $3, $4}'))
+    echo "${digits[0]}${digits[1]}${digits[2]}${digits[3]}"
+}
+
+function count_bulls_and_cows() {
+    local guess="$1"
+    local bulls=0
+    local cows=0
+    
+    for ((i=0; i<4; i++)); do
+        if [[ "${guess:i:1}" == "${secret:i:1}" ]]; then
+            ((bulls++))
+        elif [[ "$secret" == *"${guess:i:1}"* ]]; then
+            ((cows++))
+        fi
+    done
+    echo "$bulls $cows"
+}
+
+trap 'echo "\nЧтобы выйти, введите 'q' или 'Q'"' SIGINT
+
+secret=$(generate_number)
+
+echo "********************************************************************************"
+echo "* Я загадал 4-значное число с неповторяющимися цифрами. На каждом ходу делайте *"
+echo "* попытку отгадать загаданное число. Попытка - это 4-значное число с           *"
+echo "* неповторяющимися цифрами.                                                    *"
+echo "********************************************************************************"
+
+attempts=()
+count=0
+
+while true; do
+    read -p "Попытка $(($count + 1)): " guess
+    
+    if [[ "$guess" =~ ^[qQ]$ ]]; then
+        exit 1
+    fi
+    
+    if ! [[ "$guess" =~ ^[0-9]{4}$ ]] || [[ "$(echo "$guess" | grep -o . | sort | uniq | wc -l)" -ne 4 ]]; then
+        echo "Ошибка: Введите 4-значное число с неповторяющимися цифрами."
+        continue
+    fi
+    
+    ((count++))
+    read bulls cows <<< $(count_bulls_and_cows "$guess")
+    attempts+=("$count. $guess (Коров - $cows Быков - $bulls)")
+    
+    echo "Коров - $cows, Быков - $bulls"
+    echo -e "\nИстория ходов:"
+    printf "%s\n" "${attempts[@]}"
+    
+    if [[ "$guess" == "$secret" ]]; then
+        echo "Поздравляю! Вы угадали число!"
+        exit 0
+    fi
+done

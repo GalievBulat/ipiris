@@ -1,0 +1,87 @@
+#!/bin/bash
+set -eo pipefail
+
+command -v yc &>/dev/null || { echo "Yandex Cloud CLI is not installed. Please install it and try again."; exit 1; }
+command -v jq &>/dev/null || { echo "JQ is not installed. Please install it and try again."; exit 1; }
+
+VM_NAME="bookstore"
+NETWORK_NAME="b-network"
+SUBNET_NAME="b-subnet"
+ZONE="ru-central1-a"
+IMAGE_ID="fd8bpal18cm4kprpjc2m"
+SSH_KEY_NAME="ssh_key"
+USER="admin"
+SUBNET_CIDR="192.168.0.0/24"
+
+if [[ ! -f "${SSH_KEY_NAME}" ]]; then
+        echo "Generating SSH key pair..."
+        ssh-keygen -t rsa -b 2048 -f "${SSH_KEY_NAME}" -N "" \
+            || error "Failed to generate SSH keys"
+    fi
+
+CLOUD_INIT_FILE=$(mktemp)
+
+cat <<EOF > $CLOUD_INIT_FILE
+#cloud-config
+users:
+  - name: $USER
+    ssh-authorized-keys:
+      - $(cat ${SSH_KEY_NAME}.pub)
+    groups: sudo
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    shell: /bin/bash
+EOF
+
+if ! yc vpc network get "$NETWORK_NAME" &>/dev/null; then
+        echo "Creating network $NETWORK_NAME..."
+        yc vpc network create --name "$NETWORK_NAME" \
+            || error "Failed to create network"
+    fi
+if ! yc vpc subnet get "$SUBNET_NAME" &>/dev/null; then
+        echo "Creating subnet $SUBNET_NAME..."
+        yc vpc subnet create \
+            --name "$SUBNET_NAME" \
+            --zone "$ZONE" \
+            --range "$SUBNET_CIDR" \
+            --network-name "$NETWORK_NAME" \
+            || error "Failed to create subnet"
+    fi
+
+yc compute instance create \
+  --name $VM_NAME \
+  --zone $ZONE \
+  --platform "standard-v3" \
+  --cores 2 \
+  --memory 4 \
+  --create-boot-disk size=20,type=network-ssd,image-id=$IMAGE_ID \
+  --network-interface subnet-name=$SUBNET_NAME,nat-ip-version=ipv4 \
+  --metadata-from-file user-data=$CLOUD_INIT_FILE
+
+rm -f $CLOUD_INIT_FILE
+
+EXTERNAL_IP=$(yc compute instance get --name $VM_NAME --format json | jq -r '.network_interfaces[0].primary_v4_address.one_to_one_nat.address')
+if [[ -z "$EXTERNAL_IP" ]]; then
+    echo "Failed to retrieve external IP address."
+    exit 1
+fi
+
+ssh -o StrictHostKeyChecking=no -i $SSH_KEY_NAME $USER@$EXTERNAL_IP << EOF
+sudo snap install docker
+sudo systemctl daemon-reload
+sudo systemctl enable snap.docker.dockerd.service
+sudo systemctl start snap.docker.dockerd.service
+sudo systemctl restart snap.docker.dockerd.service
+sleep 10
+sudo docker run -d --restart=always -p 80:8080 jmix/jmix-bookstore
+EOF
+
+cat <<-EOF
+
+	=== Connection Information ===
+	SSH access:
+	ssh -i ${SSH_KEY_NAME} ${USER}@${EXTERNAL_IP}
+
+	Application URL:
+	http://${EXTERNAL_IP}
+	EOF
+    
